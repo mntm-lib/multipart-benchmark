@@ -13,7 +13,7 @@ export const parse = async (form, boundary) => {
 
     instance.on('error', reject);
 
-    instance.initWithBoundary(boundary.substring(2));
+    instance.initWithBoundary(boundary.slice(2));
     
     instance.end(form, () => {
       resolve(result);

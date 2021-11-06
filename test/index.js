@@ -32,11 +32,9 @@ const bench = (name, fn) => {
 };
 
 const suite = async (items) => {
-  let promise = Promise.resolve();
-  items.forEach((item) => {
-    promise = promise.then(item);
-  });
-  return promise;
+  for (const item of items) {
+    await item();
+  }
 };
 
 suite([

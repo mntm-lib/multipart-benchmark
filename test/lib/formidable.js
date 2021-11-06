@@ -1,23 +1,29 @@
 import { default as formidable } from 'formidable';
 
-export const parse = async (form, boundary) => {
-  return new Promise((resolve, reject) => {
-    const instance = new formidable.MultipartParser();
+/**
+ * @param {import('http').Server} server 
+ * @param {(result: any) => void} done
+ */
+export const handleFormidable = (server, done) => {
+  /**
+   * @param {import('http').IncomingMessage} req 
+   * @param {import('http').ServerResponse} res 
+   */
+  const handler = (req, res) => {
+    const instance = formidable.formidable();
+
     const result = {};
 
-    instance.on('data', ({ name, buffer, start, end }) => {
-      if (buffer && start && end) {
-        result[name] = buffer.slice(start, end);
-      }
+    instance.parse(req, (err, fields, files) => {
+      Object.assign(result, fields, files);
+
+      res.end(() => {
+        done(result);
+      });
     });
+  }
 
-    instance.on('error', reject);
+  server.on('request', handler);
 
-    instance.initWithBoundary(boundary.slice(2));
-    
-    instance.end(form, () => {
-      resolve(result);
-    });
-  });
-}
-
+  return () => server.off('request', handler);
+};

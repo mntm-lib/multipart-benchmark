@@ -1,43 +1,25 @@
-import { EventEmitter } from 'events';
-
 import * as multiparty from 'multiparty';
 
-const emitter = Object.assign(new EventEmitter(), {
-  readable: true,
-  resume() {
-    // stub
-  },
-  pipe() {
-    // stub
-  },
-  headers: {
-    // stub
-    'content-type': ''
-  }
-});
-
-export const parse = async (form, boundary) => {
-  return new Promise((resolve, reject) => {
+/**
+ * @param {import('http').Server} server 
+ * @param {(result: any) => void} done
+ */
+export const handleMultiparty = (server, done) => {
+  const handler = (req, res) => {
     const instance = new multiparty.Form();
+
     const result = {};
 
-    instance.on('error', reject);
+    instance.parse(req, (err, fields, files) => {
+      Object.assign(result, fields, files);
 
-    instance.on('field', (name, value) => {
-      result[name] = value;
-    });
-
-    instance.on('close', () => {
-      resolve(result);
-    });
-    
-    emitter.headers['content-type'] = 'multipart/form-data; boundary=--' + boundary;
-    emitter.pipe = () => {
-      instance._write(form, null, () => {
-        emitter.emit('end');
+      res.end(() => {
+        done(result);
       });
-    };
+    });
+  };
 
-    instance.parse(emitter);
-  });
-}
+  server.on('request', handler);
+
+  return () => server.off('request', handler);
+};

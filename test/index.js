@@ -1,54 +1,96 @@
+import http from 'http';
+import undici from 'undici';
+import microtime from 'microtime';
 
-process.on('uncaughtException', console.log);
-process.on('unhandledRejection', console.log);
-process.on('rejectionHandled', console.log);
+import { handleBusboy } from './lib/busboy.js';
+import { handleMultipart } from './lib/mntm.multipart.js';
+import { handleFormidable } from './lib/formidable.js';
+import { handleMultiparty } from './lib/multiparty.js';
 
-import fs from 'fs';
-import path from 'path';
-import url from 'url';
+import * as simple from './data/simple.js';
 
-import { parse as busboy_parse } from './lib/busboy.js';
-import { parse as formidable_parse } from './lib/formidable.js';
-import { parse as multiparty_parse } from './lib/multiparty.js';
-import { parse as mntm_parse } from './lib/mntm.multipart.js';
+const server = http.createServer();
 
-const __filename = url.fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const file = path.resolve(__dirname, './data/simple.txt');
-
-const SIMPLE = fs.readFileSync(file);
-const SIMPLE_BOUNDARY = '--simple';
-
-const bench = (name, fn) => {
-  return async () => {
-    console.log('-----');
-    console.time(name);
-    for (let i = 100000; --i;) {
-      await fn();
+const emit = () => {
+  return undici.fetch('http://localhost:3000', {
+    method: 'POST',
+    body: simple.body,
+    headers: {
+      'content-length': Buffer.byteLength(simple.body),
+      'content-type': `multipart/form-data; boundary=${simple.boundary}`
     }
-    console.timeEnd(name);
-    console.log('-----');
-  }
+  }).then((response) => {
+    if (!response.ok) {
+      throw new Error('Response error');
+    }
+  });
 };
 
-const suite = async (items) => {
-  for (const item of items) {
-    await item();
-  }
+const ROUNDS = 4;
+const COUNT = 10000;
+const DONE_CALLBACK = () => {
+  // TODO
 };
 
-suite([
-  bench('mntm #round1', () => mntm_parse(SIMPLE, SIMPLE_BOUNDARY)),
-  bench('busboy #round1', () => busboy_parse(SIMPLE, SIMPLE_BOUNDARY)),
-  bench('formidable #round1', () => formidable_parse(SIMPLE, SIMPLE_BOUNDARY)),
-  bench('multiparty #round1', () => multiparty_parse(SIMPLE, SIMPLE_BOUNDARY)),
+/**
+ * @const {Record<name, number[]>}
+ */
+const results = {};
 
-  bench('mntm #round2', () => mntm_parse(SIMPLE, SIMPLE_BOUNDARY)),
-  bench('busboy #round2', () => busboy_parse(SIMPLE, SIMPLE_BOUNDARY)),
-  bench('formidable #round2', () => formidable_parse(SIMPLE, SIMPLE_BOUNDARY)),
-  bench('multiparty #round2', () => multiparty_parse(SIMPLE, SIMPLE_BOUNDARY)),
-]).then(() => {
-  console.log('done');
-}).catch((ex) => {
-  console.error(ex);
+/**
+ * @param {string} name
+ */
+const bench = async (name, handler) => {
+  const free = handler(server, DONE_CALLBACK);
+
+  const start = microtime.nowDouble();
+  for (let i = COUNT; i--;) {
+    await emit();
+  };
+  const total = microtime.nowDouble() - start;
+
+  free();
+  
+  const rps = Math.floor(COUNT / total);
+  results[name] = results[name] || [];
+  results[name].push(rps);
+};
+
+server.listen(3000, 'localhost', async () => {
+  for (let i = 1; i <= ROUNDS; ++i) {
+    console.log(`---- round ${i} ----`);
+
+    await bench('formidable', handleFormidable);
+
+    await bench('multiparty', handleMultiparty);
+
+    await bench('busboy', handleBusboy);
+
+    await bench('@mntm/multipart', handleMultipart);
+  }
+
+  server.close(() => {
+    const tableName = (name) => String(name).padEnd(16);
+    const tableValue = (value) => String(value).padEnd(5);
+    const tableRow = (name, min, max, mid) => `|${tableName(name)}|${tableValue(min)}|${tableValue(max)}|${tableValue(mid)}|`;
+
+    console.log(tableRow('name', 'min', 'max', 'mid'));
+    console.log(tableRow('-'.repeat(16), '-'.repeat(5), '-'.repeat(5), '-'.repeat(5)));
+
+    for (const name in results) {
+      let min = Number.POSITIVE_INFINITY;
+      let max = Number.NEGATIVE_INFINITY;
+      let mid = 0;
+
+      for (const rps of results[name]) {
+        mid += rps;
+        min = Math.min(min, rps);
+        max = Math.max(max, rps);
+      }
+
+      mid = Math.round(mid / ROUNDS);
+
+      console.log(tableRow(name, min, max, mid));
+    }
+  });
 });

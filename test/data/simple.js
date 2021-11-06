@@ -1,0 +1,2 @@
+export const boundary = 'simple';
+export const body = '--simple\r\nContent-Disposition: form-data; name="text"\r\n\r\ntext default\r\n--simple\r\nContent-Disposition: form-data; name="file1"; filename="a.txt"\r\nContent-Type: text/plain\r\n\r\nContent of a.txt.\r\n--simple--\r\n';

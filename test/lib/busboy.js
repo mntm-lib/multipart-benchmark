@@ -1,49 +1,74 @@
-import { EventEmitter } from 'events';
-
+import { Buffer } from 'buffer';
 import { default as Busboy } from 'busboy';
 
-const emitter = Object.assign(new EventEmitter(), {
-  pipe() {
-    // stub
-  }
-});
-
-export const parse = async (form, boundary) => {
-  return new Promise((resolve, reject) => {
-    const instance = new Busboy({
-      headers: {
-        'content-type': 'multipart/form-data; boundary=--' + boundary
-      }
+/**
+ * @param {import('http').Server} server
+ * @param {(result: any) => void} done
+ */
+export const handleBusboy = (server, done) => {
+  /**
+   * @param {import('http').IncomingMessage} req 
+   * @param {import('http').ServerResponse} res 
+   */
+  const handler = (req, res) => {
+    const busboy = new Busboy({
+      headers: req.headers
     });
 
     const result = {};
 
-    instance.on('error', (ex) => {
-      console.log('error', ext);
+    // Busboy does not wait for end of reading files
+    let files = [];
 
-      reject(ex);
-    });
+    busboy.on('file', (name, file, filename, encoding, mime) => {
+      const read = new Promise((resolve) => {
+        const buffers = [];
+        let totalLength = 0;
 
-    instance.on('field', (name, value) => {
-      console.log('field', name, value);
+        file.on('data', (chunk) => {
+          totalLength += chunk.length;
+          buffers.push(chunk);
+        });
 
-      result[name] = value;
-    });
+        file.on('end', () => {
+          result[name] = {
+            content: Buffer.concat(buffers, totalLength),
+            headers: {
+              name,
+              filename,
+              encoding,
+              mime
+            }
+          };
 
-    instance.on('finish', () => {
-      console.log('finish', result);
-
-      resolve(result);
-    });
-    
-    emitter.pipe = () => {
-      console.log('pipe');
-
-      instance._write(form, null, () => {
-        console.log('end');
-
-        emitter.emit('end');
+          resolve();
+        })
       });
-    };
-  });
-}
+
+      files.push(read);
+    });
+
+    busboy.on('field', (name, val) => {
+      result[name] = {
+        content: val,
+        headers: {
+          name
+        }
+      };
+    });
+
+    busboy.on('finish', () => {
+      Promise.all(files).then(() => {
+        res.end(() => {
+          done(result);
+        });
+      });
+    });
+
+    req.pipe(busboy);
+  }
+
+  server.on('request', handler);
+
+  return () => server.off('request', handler);
+};
